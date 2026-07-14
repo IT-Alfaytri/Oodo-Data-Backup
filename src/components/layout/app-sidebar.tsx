@@ -6,14 +6,14 @@ import { NAV_ITEMS } from "@/lib/constants";
 import {
   LayoutDashboard, ShoppingCart, Truck, Package, Users, Factory,
   Calculator, FileText, Receipt, FileX, Warehouse, ArrowLeftRight,
-  DollarSign, Briefcase, Menu, X,
+  DollarSign, Briefcase, BarChart3, Menu, X,
 } from "lucide-react";
 import { useState } from "react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, ShoppingCart, Truck, Package, Users, Factory,
   Calculator, FileText, Receipt, FileX, Warehouse, ArrowLeftRight,
-  DollarSign, Briefcase, Menu, X,
+  DollarSign, Briefcase, BarChart3, Menu, X,
 };
 
 export function AppSidebar() {

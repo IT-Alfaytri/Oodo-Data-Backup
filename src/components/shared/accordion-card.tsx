@@ -32,7 +32,15 @@ export function AccordionCard({
   return (
     <div className="bg-white rounded-lg border border-gray-200 mb-3 overflow-hidden transition-shadow hover:shadow-sm">
       <div
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
         className="px-5 py-4 cursor-pointer flex items-center gap-4 flex-wrap hover:bg-gray-50 select-none"
       >
         <ChevronRight

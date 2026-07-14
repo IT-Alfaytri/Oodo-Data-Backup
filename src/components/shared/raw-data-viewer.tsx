@@ -23,7 +23,7 @@ export function RawDataViewer({
         <Code className="h-4 w-4 mr-1" />
         Raw Data
       </DialogTrigger>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{title ?? "Raw JSON Data"}</DialogTitle>
         </DialogHeader>

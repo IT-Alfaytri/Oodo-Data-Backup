@@ -31,12 +31,6 @@ export default function LoginPage() {
       return;
     }
 
-    if (isSignUp) {
-      setError("Check your email to confirm your account.");
-      setLoading(false);
-      return;
-    }
-
     router.push("/");
     router.refresh();
   }
