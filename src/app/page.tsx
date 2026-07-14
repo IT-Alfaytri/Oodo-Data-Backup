@@ -116,6 +116,7 @@ const SECTIONS = [
     icon: DollarSign,
     table: "landed_costs",
     color: "#d35400",
+    noCompany: true,
   },
   {
     label: "Employees",
@@ -165,7 +166,7 @@ export default function DashboardPage() {
         }
       }
 
-      if (companyFilter !== null) {
+      if (companyFilter !== null && !section.noCompany) {
         query = query.eq("company_id", companyFilter);
       }
 

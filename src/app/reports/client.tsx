@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +15,8 @@ interface ReportConfig {
   run: (
     supabase: ReturnType<typeof createClient>,
     from: string,
-    to: string
+    to: string,
+    companyFilter: string | null
   ) => Promise<void>;
 }
 
@@ -44,10 +46,11 @@ const REPORTS: ReportConfig[] = [
     title: "Sales by Customer",
     description:
       "Total sales amount grouped by customer. Useful for identifying top customers.",
-    run: async (supabase, from, to) => {
+    run: async (supabase, from, to, companyFilter) => {
       let query = supabase
         .from("sale_orders")
         .select("partner_id, amount_total");
+      if (companyFilter) query = query.eq("company_id", companyFilter);
       if (from) query = query.gte("date_order", from);
       if (to) query = query.lte("date_order", to);
       const { data } = await query.limit(100000);
@@ -72,7 +75,7 @@ const REPORTS: ReportConfig[] = [
     title: "Product Profitability",
     description:
       "Sales order lines grouped by product with total margin analysis.",
-    run: async (supabase, from, to) => {
+    run: async (supabase, from, to, _companyFilter) => {
       let query = supabase
         .from("sale_order_lines")
         .select("product_id, price_subtotal, margin, purchase_price");
@@ -105,10 +108,11 @@ const REPORTS: ReportConfig[] = [
     title: "Vendor Spend Summary",
     description:
       "Purchase orders grouped by vendor with total spend breakdown.",
-    run: async (supabase, from, to) => {
+    run: async (supabase, from, to, companyFilter) => {
       let query = supabase
         .from("purchase_orders")
         .select("partner_id, amount_total");
+      if (companyFilter) query = query.eq("company_id", companyFilter);
       if (from) query = query.gte("date_order", from);
       if (to) query = query.lte("date_order", to);
       const { data } = await query.limit(100000);
@@ -136,7 +140,7 @@ const REPORTS: ReportConfig[] = [
     title: "Outstanding Receivables",
     description:
       "Customer invoices with remaining balance (amount_residual > 0).",
-    run: async (supabase, from, to) => {
+    run: async (supabase, from, to, companyFilter) => {
       let query = supabase
         .from("invoices")
         .select(
@@ -144,6 +148,7 @@ const REPORTS: ReportConfig[] = [
         )
         .eq("move_type", "out_invoice")
         .gt("amount_residual", 0);
+      if (companyFilter) query = query.eq("company_id", companyFilter);
       if (from) query = query.gte("date", from);
       if (to) query = query.lte("date", to);
       const { data } = await query
@@ -168,7 +173,7 @@ const REPORTS: ReportConfig[] = [
     title: "Outstanding Payables",
     description:
       "Vendor bills with remaining balance (amount_residual > 0).",
-    run: async (supabase, from, to) => {
+    run: async (supabase, from, to, companyFilter) => {
       let query = supabase
         .from("invoices")
         .select(
@@ -176,6 +181,7 @@ const REPORTS: ReportConfig[] = [
         )
         .eq("move_type", "in_invoice")
         .gt("amount_residual", 0);
+      if (companyFilter) query = query.eq("company_id", companyFilter);
       if (from) query = query.gte("date", from);
       if (to) query = query.lte("date", to);
       const { data } = await query
@@ -200,13 +206,14 @@ const REPORTS: ReportConfig[] = [
     title: "Inventory Summary",
     description:
       "Current stock quantities by product and location.",
-    run: async (supabase) => {
-      const { data } = await supabase
+    run: async (supabase, _from, _to, companyFilter) => {
+      let query = supabase
         .from("stock_quants")
         .select("product_id, location_id, quantity, reserved_quantity")
         .gt("quantity", 0)
-        .order("product_id")
-        .limit(100000);
+        .order("product_id");
+      if (companyFilter) query = query.eq("company_id", companyFilter);
+      const { data } = await query.limit(100000);
       if (!data?.length) return;
       const csv = generateCSV(data as Record<string, unknown>[], [
         "product_id",
@@ -219,7 +226,7 @@ const REPORTS: ReportConfig[] = [
   },
 ];
 
-function ReportCard({ report }: { report: ReportConfig }) {
+function ReportCard({ report, companyFilter }: { report: ReportConfig; companyFilter: string | null }) {
   const supabase = createClient();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -227,7 +234,7 @@ function ReportCard({ report }: { report: ReportConfig }) {
 
   async function handleRun() {
     setRunning(true);
-    await report.run(supabase, from, to);
+    await report.run(supabase, from, to, companyFilter);
     setRunning(false);
   }
 
@@ -274,6 +281,8 @@ function ReportCard({ report }: { report: ReportConfig }) {
 }
 
 export function ReportsClient() {
+  const { companyFilter } = useCompany();
+
   return (
     <div className="px-8 py-6">
       <p className="text-sm text-gray-500 mb-6">
@@ -282,7 +291,7 @@ export function ReportsClient() {
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {REPORTS.map((report) => (
-          <ReportCard key={report.title} report={report} />
+          <ReportCard key={report.title} report={report} companyFilter={companyFilter} />
         ))}
       </div>
     </div>
