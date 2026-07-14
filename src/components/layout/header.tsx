@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LogOut } from "lucide-react";
 
 export function Header({
@@ -26,6 +27,11 @@ export function Header({
       <h1 className="text-xl font-bold text-[#1a1a2e]">{title}</h1>
       {userEmail && (
         <div className="flex items-center gap-3">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-gray-200 text-gray-700 font-medium">
+              {userEmail.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
           <span className="text-sm text-gray-500">{userEmail}</span>
           <Button variant="ghost" size="sm" onClick={handleSignOut}>
             <LogOut className="h-4 w-4" />
