@@ -7,16 +7,11 @@ export default async function StockMovementsPage() {
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  const user = session?.user;
-
-  const { count } = await supabase
-    .from("stock_pickings")
-    .select("*", { count: "exact", head: true });
 
   return (
     <>
-      <Header title="Stock Movements" userEmail={user?.email} />
-      <StockMovementsClient totalCount={count ?? 0} />
+      <Header title="Stock Movements" userEmail={session?.user?.email} />
+      <StockMovementsClient />
     </>
   );
 }

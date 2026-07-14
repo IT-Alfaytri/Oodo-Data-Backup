@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { StatsBar } from "@/components/shared/stats-bar";
 import { SearchToolbar } from "@/components/shared/search-toolbar";
 import { AccordionCard } from "@/components/shared/accordion-card";
 import { PaginationControls } from "@/components/shared/pagination-controls";
 import { AnnotationPanel } from "@/components/shared/annotation-panel";
 import { ExportDialog } from "@/components/shared/export-dialog";
-import { RawDataViewer } from "@/components/shared/raw-data-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatAmount, formatDate, PAGE_SIZE } from "@/lib/constants";
 import type { Invoice, InvoiceLine } from "@/lib/types";
@@ -34,22 +34,32 @@ const EXPORT_COLUMNS = [
   "invoice_origin",
 ];
 
-export function CustomerInvoicesClient({
-  totalCount,
-  totalAmount,
-}: {
-  totalCount: number;
-  totalAmount: number;
-}) {
+export function CustomerInvoicesClient() {
   const supabase = createClient();
+  const { companyFilter } = useCompany();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [page, setPage] = useState(1);
-  const [filteredCount, setFilteredCount] = useState(totalCount);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalAmount, setTotalAmount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [lines, setLines] = useState<Record<number, InvoiceLine[]>>({});
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    let query = supabase
+      .from("invoices")
+      .select("amount_total.sum(), id.count()")
+      .eq("move_type", "out_invoice");
+    if (companyFilter) query = query.eq("company_id", companyFilter);
+    const { data } = await query.single();
+    if (data) {
+      setTotalCount((data as any).count ?? 0);
+      setTotalAmount((data as any).sum ?? 0);
+    }
+  }, [supabase, companyFilter]);
 
   const fetchInvoices = useCallback(async () => {
     let query = supabase
@@ -58,6 +68,7 @@ export function CustomerInvoicesClient({
       .eq("move_type", "out_invoice")
       .order("date", { ascending: false });
 
+    if (companyFilter) query = query.eq("company_id", companyFilter);
     if (search) {
       query = query.or(
         `name.ilike.%${search}%,partner_id.ilike.%${search}%`
@@ -73,7 +84,11 @@ export function CustomerInvoicesClient({
     const { data, count } = await query;
     setInvoices((data as Invoice[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, page, search, statusFilter]);
+  }, [supabase, page, search, statusFilter, companyFilter]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   useEffect(() => {
     fetchInvoices();
@@ -81,7 +96,7 @@ export function CustomerInvoicesClient({
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, companyFilter]);
 
   async function loadLines(invoiceId: number) {
     if (lines[invoiceId]) return;
@@ -221,12 +236,6 @@ export function CustomerInvoicesClient({
                   >
                     <MessageSquare className="h-4 w-4" />
                   </button>
-                  {invoice.raw_data && (
-                    <RawDataViewer
-                      data={invoice.raw_data}
-                      title={invoice.name}
-                    />
-                  )}
                 </div>
               </div>
 

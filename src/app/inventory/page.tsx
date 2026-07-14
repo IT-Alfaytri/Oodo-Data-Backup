@@ -7,16 +7,11 @@ export default async function InventoryPage() {
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  const user = session?.user;
-
-  const { count } = await supabase
-    .from("stock_quants")
-    .select("*", { count: "exact", head: true });
 
   return (
     <>
-      <Header title="Inventory" userEmail={user?.email} />
-      <InventoryClient totalCount={count ?? 0} />
+      <Header title="Inventory" userEmail={session?.user?.email} />
+      <InventoryClient />
     </>
   );
 }

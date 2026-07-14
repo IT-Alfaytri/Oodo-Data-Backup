@@ -8,7 +8,6 @@ import { AccordionCard } from "@/components/shared/accordion-card";
 import { PaginationControls } from "@/components/shared/pagination-controls";
 import { AnnotationPanel } from "@/components/shared/annotation-panel";
 import { ExportDialog } from "@/components/shared/export-dialog";
-import { RawDataViewer } from "@/components/shared/raw-data-viewer";
 import { formatAmount, PAGE_SIZE } from "@/lib/constants";
 import type { LandedCost, LandedCostLine } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
@@ -29,22 +28,34 @@ const EXPORT_COLUMNS = [
   "account_journal_id",
 ];
 
-export function CostingClient({
-  totalCount,
-  totalAmount,
-}: {
-  totalCount: number;
-  totalAmount: number;
-}) {
+export function CostingClient() {
   const supabase = createClient();
   const [costs, setCosts] = useState<LandedCost[]>([]);
   const [page, setPage] = useState(1);
-  const [filteredCount, setFilteredCount] = useState(totalCount);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalAmount, setTotalAmount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [lines, setLines] = useState<Record<number, LandedCostLine[]>>({});
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    const { count } = await supabase
+      .from("landed_costs")
+      .select("*", { count: "exact", head: true });
+    setTotalCount(count ?? 0);
+
+    const { data } = await supabase
+      .from("landed_costs")
+      .select("amount_total");
+    const sum = (data ?? []).reduce(
+      (acc: number, r: { amount_total: number }) => acc + (r.amount_total ?? 0),
+      0
+    );
+    setTotalAmount(sum);
+  }, [supabase]);
 
   const fetchCosts = useCallback(async () => {
     let query = supabase
@@ -69,6 +80,9 @@ export function CostingClient({
     setFilteredCount(count ?? 0);
   }, [supabase, page, search, statusFilter]);
 
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
   useEffect(() => {
     fetchCosts();
   }, [fetchCosts]);
@@ -166,9 +180,6 @@ export function CostingClient({
                   >
                     <MessageSquare className="h-4 w-4" />
                   </button>
-                  {cost.raw_data && (
-                    <RawDataViewer data={cost.raw_data} title={cost.name} />
-                  )}
                 </div>
               </div>
 

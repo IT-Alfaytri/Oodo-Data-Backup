@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { StatsBar } from "@/components/shared/stats-bar";
 import { SearchToolbar } from "@/components/shared/search-toolbar";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { PaginationControls } from "@/components/shared/pagination-controls";
 import { AnnotationPanel } from "@/components/shared/annotation-panel";
 import { ExportDialog } from "@/components/shared/export-dialog";
-import { RawDataViewer } from "@/components/shared/raw-data-viewer";
 import { formatAmount, PAGE_SIZE } from "@/lib/constants";
 import type { Contact } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
@@ -51,15 +51,27 @@ const EXPORT_COLUMNS = [
   "credit_limit",
 ];
 
-export function CustomersClient({ totalCount }: { totalCount: number }) {
+export function CustomersClient() {
   const supabase = createClient();
+  const { companyFilter } = useCompany();
   const [customers, setCustomers] = useState<Contact[]>([]);
   const [page, setPage] = useState(1);
-  const [filteredCount, setFilteredCount] = useState(totalCount);
+  const [totalCount, setTotalCount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    let query = supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .gt("customer_rank", 0);
+    if (companyFilter) query = query.eq("company_id", companyFilter);
+    const { count } = await query;
+    setTotalCount(count ?? 0);
+  }, [supabase, companyFilter]);
 
   const fetchCustomers = useCallback(async () => {
     let query = supabase
@@ -68,6 +80,7 @@ export function CustomersClient({ totalCount }: { totalCount: number }) {
       .gt("customer_rank", 0)
       .order("name");
 
+    if (companyFilter) query = query.eq("company_id", companyFilter);
     if (search)
       query = query.or(
         `name.ilike.%${search}%,email.ilike.%${search}%`
@@ -81,14 +94,17 @@ export function CustomersClient({ totalCount }: { totalCount: number }) {
     const { data, count } = await query;
     setCustomers((data as Contact[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, page, search, filter]);
+  }, [supabase, page, search, filter, companyFilter]);
 
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
   useEffect(() => {
     fetchCustomers();
   }, [fetchCustomers]);
   useEffect(() => {
     setPage(1);
-  }, [search, filter]);
+  }, [search, filter, companyFilter]);
 
   const totalPages = Math.ceil(filteredCount / PAGE_SIZE);
 
@@ -157,12 +173,6 @@ export function CustomersClient({ totalCount }: { totalCount: number }) {
                 >
                   <MessageSquare className="h-4 w-4" />
                 </button>
-                {customer.raw_data && (
-                  <RawDataViewer
-                    data={customer.raw_data}
-                    title={customer.name}
-                  />
-                )}
               </div>
             </div>
           )}

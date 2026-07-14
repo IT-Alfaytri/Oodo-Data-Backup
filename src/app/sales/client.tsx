@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { StatsBar } from "@/components/shared/stats-bar";
 import { SearchToolbar } from "@/components/shared/search-toolbar";
 import { AccordionCard } from "@/components/shared/accordion-card";
 import { PaginationControls } from "@/components/shared/pagination-controls";
 import { AnnotationPanel } from "@/components/shared/annotation-panel";
 import { ExportDialog } from "@/components/shared/export-dialog";
-import { RawDataViewer } from "@/components/shared/raw-data-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatAmount, formatDate, PAGE_SIZE } from "@/lib/constants";
 import type { SaleOrder, SaleOrderLine } from "@/lib/types";
@@ -36,22 +36,35 @@ const EXPORT_COLUMNS = [
   "margin",
 ];
 
-export function SalesClient({
-  totalCount,
-  totalAmount,
-}: {
-  totalCount: number;
-  totalAmount: number;
-}) {
+export function SalesClient() {
   const supabase = createClient();
+  const { companyFilter } = useCompany();
   const [orders, setOrders] = useState<SaleOrder[]>([]);
   const [page, setPage] = useState(1);
-  const [filteredCount, setFilteredCount] = useState(totalCount);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalAmount, setTotalAmount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [lines, setLines] = useState<Record<number, SaleOrderLine[]>>({});
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    let countQuery = supabase.from("sale_orders").select("*", { count: "exact", head: true });
+    if (companyFilter) countQuery = countQuery.eq("company_id", companyFilter);
+    const { count } = await countQuery;
+    setTotalCount(count ?? 0);
+
+    let sumQuery = supabase.from("sale_orders").select("amount_total").not("amount_total", "is", null);
+    if (companyFilter) sumQuery = sumQuery.eq("company_id", companyFilter);
+    const { data: totalResult } = await sumQuery;
+    setTotalAmount(totalResult?.reduce((s, r) => s + (r.amount_total ?? 0), 0) ?? 0);
+  }, [companyFilter]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   const fetchOrders = useCallback(async () => {
     let query = supabase
@@ -59,6 +72,7 @@ export function SalesClient({
       .select("*", { count: "exact" })
       .order("date_order", { ascending: false });
 
+    if (companyFilter) query = query.eq("company_id", companyFilter);
     if (search) {
       query = query.or(
         `name.ilike.%${search}%,partner_id.ilike.%${search}%`
@@ -74,7 +88,7 @@ export function SalesClient({
     const { data, count } = await query;
     setOrders((data as SaleOrder[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, page, search, statusFilter]);
+  }, [supabase, page, search, statusFilter, companyFilter]);
 
   useEffect(() => {
     fetchOrders();
@@ -82,7 +96,7 @@ export function SalesClient({
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, companyFilter]);
 
   async function loadLines(orderId: number) {
     if (lines[orderId]) return;
@@ -199,9 +213,6 @@ export function SalesClient({
                   >
                     <MessageSquare className="h-4 w-4" />
                   </button>
-                  {order.raw_data && (
-                    <RawDataViewer data={order.raw_data} title={order.name} />
-                  )}
                 </div>
               </div>
 

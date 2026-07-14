@@ -1,4 +1,8 @@
-import { createClient } from "@/lib/supabase/server";
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { Header } from "@/components/layout/header";
 import { formatAmount } from "@/lib/constants";
 import Link from "next/link";
@@ -16,6 +20,7 @@ import {
   ArrowLeftRight,
   DollarSign,
   Briefcase,
+  Loader2,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -121,92 +126,151 @@ const SECTIONS = [
   },
 ];
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  const user = session?.user;
+export default function DashboardPage() {
+  const supabase = createClient();
+  const { companyFilter } = useCompany();
 
-  const counts: Record<string, number> = {};
-  for (const section of SECTIONS) {
-    let query = supabase
-      .from(section.table)
-      .select("*", { count: "exact", head: true });
-    if (section.filter) {
-      if (section.filter.op === "gt")
-        query = query.gt(section.filter.column, section.filter.value);
-      else if (section.filter.op === "eq")
-        query = query.eq(section.filter.column, section.filter.value);
-      else if (section.filter.op === "in") {
-        const vals = String(section.filter.value)
-          .replace(/[()]/g, "")
-          .split(",");
-        query = query.in(section.filter.column, vals);
+  const [loading, setLoading] = useState(true);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [totalSales, setTotalSales] = useState(0);
+  const [userEmail, setUserEmail] = useState<string | undefined>();
+
+  // Fetch user email on mount
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUserEmail(session?.user?.email);
+    });
+  }, [supabase]);
+
+  // Fetch all dashboard data in parallel when companyFilter changes
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+
+    // Build all count queries
+    const countPromises = SECTIONS.map((section) => {
+      let query = supabase
+        .from(section.table)
+        .select("*", { count: "exact", head: true });
+
+      if (section.filter) {
+        if (section.filter.op === "gt")
+          query = query.gt(section.filter.column, section.filter.value);
+        else if (section.filter.op === "eq")
+          query = query.eq(section.filter.column, section.filter.value);
+        else if (section.filter.op === "in") {
+          const vals = String(section.filter.value)
+            .replace(/[()]/g, "")
+            .split(",");
+          query = query.in(section.filter.column, vals);
+        }
       }
-    }
-    const { count } = await query;
-    counts[section.label] = count ?? 0;
-  }
 
-  const { data: salesTotal } = await supabase
-    .from("sale_orders")
-    .select("amount_total")
-    .not("amount_total", "is", null);
-  const totalSales =
-    salesTotal?.reduce((s, r) => s + (r.amount_total ?? 0), 0) ?? 0;
+      if (companyFilter !== null) {
+        query = query.eq("company_id", companyFilter);
+      }
+
+      return query;
+    });
+
+    // Build sales total query
+    let salesQuery = supabase
+      .from("sale_orders")
+      .select("amount_total")
+      .not("amount_total", "is", null);
+
+    if (companyFilter !== null) {
+      salesQuery = salesQuery.eq("company_id", companyFilter);
+    }
+
+    // Run everything in parallel
+    const [salesResult, ...countResults] = await Promise.all([
+      salesQuery,
+      ...countPromises,
+    ]);
+
+    // Process counts
+    const newCounts: Record<string, number> = {};
+    SECTIONS.forEach((section, i) => {
+      newCounts[section.label] = countResults[i].count ?? 0;
+    });
+    setCounts(newCounts);
+
+    // Process sales total (sum client-side)
+    const salesData = salesResult.data;
+    const total =
+      salesData?.reduce(
+        (sum: number, row: { amount_total: number | null }) =>
+          sum + (row.amount_total ?? 0),
+        0
+      ) ?? 0;
+    setTotalSales(total);
+
+    setLoading(false);
+  }, [supabase, companyFilter]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   return (
     <>
-      <Header title="Al-Faytri Trading - Data Viewer" userEmail={user?.email} />
+      <Header title="Al-Faytri - Data Viewer" userEmail={userEmail} />
       <div className="px-8 py-6">
-        <div className="flex gap-8 mb-8 flex-wrap">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-[#1a1a2e]">
-              {Object.values(counts)
-                .reduce((a, b) => a + b, 0)
-                .toLocaleString()}
-            </div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide">
-              Total Records
-            </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-[#1a1a2e]">
-              {formatAmount(totalSales)}
-            </div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide">
-              Total Sales
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {SECTIONS.map((section) => {
-            const Icon = section.icon;
-            return (
-              <Link
-                key={section.href}
-                href={section.href}
-                className="flex items-center gap-4 px-6 py-5 bg-white rounded-lg border-l-4 shadow-sm hover:shadow-md transition-shadow"
-                style={{ borderLeftColor: section.color }}
-              >
-                <Icon
-                  className="h-7 w-7 flex-shrink-0"
-                  style={{ color: section.color }}
-                />
-                <div>
-                  <div className="text-base font-semibold text-gray-800">
-                    {section.label}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {counts[section.label]?.toLocaleString() ?? 0} records
-                  </div>
+        ) : (
+          <>
+            <div className="flex gap-8 mb-8 flex-wrap">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-[#1a1a2e]">
+                  {Object.values(counts)
+                    .reduce((a, b) => a + b, 0)
+                    .toLocaleString()}
                 </div>
-              </Link>
-            );
-          })}
-        </div>
+                <div className="text-xs text-gray-500 uppercase tracking-wide">
+                  Total Records
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-[#1a1a2e]">
+                  {formatAmount(totalSales)}
+                </div>
+                <div className="text-xs text-gray-500 uppercase tracking-wide">
+                  Total Sales
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {SECTIONS.map((section) => {
+                const Icon = section.icon;
+                return (
+                  <Link
+                    key={section.href}
+                    href={section.href}
+                    className="flex items-center gap-4 px-6 py-5 bg-white rounded-lg border-l-4 shadow-sm hover:shadow-md transition-shadow"
+                    style={{ borderLeftColor: section.color }}
+                  >
+                    <Icon
+                      className="h-7 w-7 flex-shrink-0"
+                      style={{ color: section.color }}
+                    />
+                    <div>
+                      <div className="text-base font-semibold text-gray-800">
+                        {section.label}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {counts[section.label]?.toLocaleString() ?? 0} records
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </>
   );

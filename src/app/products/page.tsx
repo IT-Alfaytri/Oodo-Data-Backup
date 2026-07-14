@@ -7,16 +7,11 @@ export default async function ProductsPage() {
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  const user = session?.user;
-
-  const { count } = await supabase
-    .from("product_templates")
-    .select("*", { count: "exact", head: true });
 
   return (
     <>
-      <Header title="Products" userEmail={user?.email} />
-      <ProductsClient totalCount={count ?? 0} />
+      <Header title="Products" userEmail={session?.user?.email} />
+      <ProductsClient />
     </>
   );
 }

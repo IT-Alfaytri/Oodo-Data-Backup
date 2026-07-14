@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { StatsBar } from "@/components/shared/stats-bar";
 import { SearchToolbar } from "@/components/shared/search-toolbar";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { PaginationControls } from "@/components/shared/pagination-controls";
 import { AnnotationPanel } from "@/components/shared/annotation-panel";
 import { ExportDialog } from "@/components/shared/export-dialog";
-import { RawDataViewer } from "@/components/shared/raw-data-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatAmount, PAGE_SIZE } from "@/lib/constants";
 import type { ProductTemplate } from "@/lib/types";
@@ -57,15 +57,26 @@ const EXPORT_COLUMNS = [
   "cost_method",
 ];
 
-export function ProductsClient({ totalCount }: { totalCount: number }) {
+export function ProductsClient() {
   const supabase = createClient();
+  const { companyFilter } = useCompany();
   const [products, setProducts] = useState<ProductTemplate[]>([]);
   const [page, setPage] = useState(1);
-  const [filteredCount, setFilteredCount] = useState(totalCount);
+  const [totalCount, setTotalCount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    let query = supabase
+      .from("product_templates")
+      .select("*", { count: "exact", head: true });
+    if (companyFilter) query = query.eq("company_id", companyFilter);
+    const { count } = await query;
+    setTotalCount(count ?? 0);
+  }, [supabase, companyFilter]);
 
   const fetchProducts = useCallback(async () => {
     let query = supabase
@@ -73,6 +84,7 @@ export function ProductsClient({ totalCount }: { totalCount: number }) {
       .select("*", { count: "exact" })
       .order("name");
 
+    if (companyFilter) query = query.eq("company_id", companyFilter);
     if (search) query = query.ilike("name", `%${search}%`);
     if (typeFilter) query = query.eq("type", typeFilter);
 
@@ -82,14 +94,17 @@ export function ProductsClient({ totalCount }: { totalCount: number }) {
     const { data, count } = await query;
     setProducts((data as ProductTemplate[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, page, search, typeFilter]);
+  }, [supabase, page, search, typeFilter, companyFilter]);
 
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
   useEffect(() => {
     setPage(1);
-  }, [search, typeFilter]);
+  }, [search, typeFilter, companyFilter]);
 
   const totalPages = Math.ceil(filteredCount / PAGE_SIZE);
 
@@ -157,12 +172,6 @@ export function ProductsClient({ totalCount }: { totalCount: number }) {
                 >
                   <MessageSquare className="h-4 w-4" />
                 </button>
-                {product.raw_data && (
-                  <RawDataViewer
-                    data={product.raw_data}
-                    title={product.name}
-                  />
-                )}
               </div>
             </div>
           )}

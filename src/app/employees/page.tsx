@@ -7,16 +7,11 @@ export default async function EmployeesPage() {
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  const user = session?.user;
-
-  const { count } = await supabase
-    .from("employees")
-    .select("*", { count: "exact", head: true });
 
   return (
     <>
-      <Header title="Employees" userEmail={user?.email} />
-      <EmployeesClient totalCount={count ?? 0} />
+      <Header title="Employees" userEmail={session?.user?.email} />
+      <EmployeesClient />
     </>
   );
 }

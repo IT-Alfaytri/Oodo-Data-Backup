@@ -27,6 +27,7 @@
 .DS_Store
 *.pem
 /scripts
+oodo.py
 
 # debug
 npm-debug.log*

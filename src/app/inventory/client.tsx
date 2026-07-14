@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { StatsBar } from "@/components/shared/stats-bar";
 import { SearchToolbar } from "@/components/shared/search-toolbar";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { PaginationControls } from "@/components/shared/pagination-controls";
 import { AnnotationPanel } from "@/components/shared/annotation-panel";
 import { ExportDialog } from "@/components/shared/export-dialog";
-import { RawDataViewer } from "@/components/shared/raw-data-viewer";
 import { formatDate, PAGE_SIZE } from "@/lib/constants";
 import type { StockQuant } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
@@ -40,14 +40,25 @@ const EXPORT_COLUMNS = [
   "lot_id",
 ];
 
-export function InventoryClient({ totalCount }: { totalCount: number }) {
+export function InventoryClient() {
   const supabase = createClient();
+  const { companyFilter } = useCompany();
   const [quants, setQuants] = useState<StockQuant[]>([]);
   const [page, setPage] = useState(1);
-  const [filteredCount, setFilteredCount] = useState(totalCount);
+  const [totalCount, setTotalCount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    let query = supabase
+      .from("stock_quants")
+      .select("*", { count: "exact", head: true });
+    if (companyFilter) query = query.eq("company_id", companyFilter);
+    const { count } = await query;
+    setTotalCount(count ?? 0);
+  }, [supabase, companyFilter]);
 
   const fetchQuants = useCallback(async () => {
     let query = supabase
@@ -55,6 +66,7 @@ export function InventoryClient({ totalCount }: { totalCount: number }) {
       .select("*", { count: "exact" })
       .order("product_id");
 
+    if (companyFilter) query = query.eq("company_id", companyFilter);
     if (search)
       query = query.or(
         `product_id.ilike.%${search}%,location_id.ilike.%${search}%`
@@ -66,14 +78,17 @@ export function InventoryClient({ totalCount }: { totalCount: number }) {
     const { data, count } = await query;
     setQuants((data as StockQuant[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, page, search]);
+  }, [supabase, page, search, companyFilter]);
 
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
   useEffect(() => {
     fetchQuants();
   }, [fetchQuants]);
   useEffect(() => {
     setPage(1);
-  }, [search]);
+  }, [search, companyFilter]);
 
   const totalPages = Math.ceil(filteredCount / PAGE_SIZE);
 
@@ -129,12 +144,6 @@ export function InventoryClient({ totalCount }: { totalCount: number }) {
                 >
                   <MessageSquare className="h-4 w-4" />
                 </button>
-                {quant.raw_data && (
-                  <RawDataViewer
-                    data={quant.raw_data}
-                    title={quant.product_id}
-                  />
-                )}
               </div>
             </div>
           )}
