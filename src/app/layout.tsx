@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { SessionTimeout } from "@/components/layout/session-timeout";
 import { CompanyProvider } from "@/lib/company-context";
 import { createClient } from "@/lib/supabase/server";
 
@@ -31,6 +32,7 @@ export default async function RootLayout({
           children
         ) : (
           <CompanyProvider>
+            <SessionTimeout />
             <div className="flex min-h-screen">
               <AppSidebar />
               <main className="flex-1 md:ml-[220px] min-w-0">{children}</main>

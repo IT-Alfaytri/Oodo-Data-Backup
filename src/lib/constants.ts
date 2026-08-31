@@ -10,6 +10,8 @@ export const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   paid: { bg: "bg-green-100", text: "text-green-800" },
   not_paid: { bg: "bg-orange-100", text: "text-orange-800" },
   partial: { bg: "bg-yellow-100", text: "text-yellow-800" },
+  in_payment: { bg: "bg-blue-100", text: "text-blue-800" },
+  reversed: { bg: "bg-gray-200", text: "text-gray-700" },
   assigned: { bg: "bg-blue-100", text: "text-blue-800" },
   confirmed: { bg: "bg-indigo-100", text: "text-indigo-800" },
   waiting: { bg: "bg-purple-100", text: "text-purple-800" },
