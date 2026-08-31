@@ -20,6 +20,10 @@ interface ExportDialogProps {
   dateColumn: string;
   columns: string[];
   filters?: Record<string, string>;
+  // When provided, applies the caller's active list filters (status/payment/
+  // search/company/date) to the export query so the CSV matches what's on screen.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  applyFilters?: (q: any) => any;
   fileName: string;
 }
 
@@ -28,6 +32,7 @@ export function ExportDialog({
   dateColumn,
   columns,
   filters,
+  applyFilters,
   fileName,
 }: ExportDialogProps) {
   const supabase = createClient();
@@ -47,8 +52,13 @@ export function ExportDialog({
       }
     }
 
-    if (from) query = query.gte(dateColumn, from);
-    if (to) query = query.lte(dateColumn, to);
+    if (applyFilters) {
+      // The list drives every filter (incl. its own date range).
+      query = applyFilters(query);
+    } else {
+      if (from) query = query.gte(dateColumn, from);
+      if (to) query = query.lte(dateColumn, to);
+    }
 
     const { data } = await query
       .order(dateColumn, { ascending: false })
@@ -75,30 +85,39 @@ export function ExportDialog({
           <DialogTitle>Export to CSV</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>From Date</Label>
-              <Input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label>To Date</Label>
-              <Input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-          </div>
-          <p className="text-sm text-gray-500">
-            Leave dates empty to export all records. Exporting up to 100,000
-            rows.
-          </p>
+          {applyFilters ? (
+            <p className="text-sm text-gray-500">
+              Exports the records currently shown, with your active filters and
+              search applied. Up to 100,000 rows.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>From Date</Label>
+                  <Input
+                    type="date"
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label>To Date</Label>
+                  <Input
+                    type="date"
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+              <p className="text-sm text-gray-500">
+                Leave dates empty to export all records. Exporting up to 100,000
+                rows.
+              </p>
+            </>
+          )}
           <Button onClick={handleExport} disabled={exporting} className="w-full">
             {exporting ? "Exporting..." : "Download CSV"}
           </Button>

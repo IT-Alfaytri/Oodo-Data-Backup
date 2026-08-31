@@ -70,6 +70,8 @@ export function InvoiceListView({
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [lines, setLines] = useState<Record<number, InvoiceLine[]>>({});
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
@@ -95,31 +97,39 @@ export function InvoiceListView({
     }
   }, [supabase, companyFilter, applyType]);
 
+  // Shared by the list query AND the CSV export so both apply the same filters.
+  const buildFilters = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (q: any) => {
+      if (companyFilter) q = q.eq("company_id", companyFilter);
+      if (search) q = q.or(`name.ilike.%${search}%,partner_id.ilike.%${search}%`);
+      if (stateFilter) q = q.eq("state", stateFilter);
+      if (dateFrom) q = q.gte("date", dateFrom);
+      if (dateTo) q = q.lte("date", dateTo);
+      if (paymentFilter === "overdue") {
+        q = q
+          .eq("state", "posted")
+          .neq("payment_state", "paid")
+          .not("invoice_date_due", "is", null)
+          .lt("invoice_date_due", TODAY);
+      } else if (paymentFilter) {
+        q = q.eq("payment_state", paymentFilter);
+      }
+      return q;
+    },
+    [companyFilter, search, stateFilter, paymentFilter, dateFrom, dateTo]
+  );
+
   const fetchInvoices = useCallback(async () => {
-    let query = applyType(
-      supabase.from("invoices").select("*", { count: "exact" })
+    let query = buildFilters(
+      applyType(supabase.from("invoices").select("*", { count: "exact" }))
     ).order("date", { ascending: false });
-
-    if (companyFilter) query = query.eq("company_id", companyFilter);
-    if (search) query = query.or(`name.ilike.%${search}%,partner_id.ilike.%${search}%`);
-    if (stateFilter) query = query.eq("state", stateFilter);
-    if (paymentFilter === "overdue") {
-      query = query
-        .eq("state", "posted")
-        .neq("payment_state", "paid")
-        .not("invoice_date_due", "is", null)
-        .lt("invoice_date_due", TODAY);
-    } else if (paymentFilter) {
-      query = query.eq("payment_state", paymentFilter);
-    }
-
     const from = (page - 1) * PAGE_SIZE;
     query = query.range(from, from + PAGE_SIZE - 1);
-
     const { data, count } = await query;
     setInvoices((data as Invoice[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, page, search, stateFilter, paymentFilter, companyFilter, applyType]);
+  }, [supabase, page, applyType, buildFilters]);
 
   useEffect(() => {
     fetchStats();
@@ -129,7 +139,7 @@ export function InvoiceListView({
   }, [fetchInvoices]);
   useEffect(() => {
     setPage(1);
-  }, [search, stateFilter, paymentFilter, companyFilter]);
+  }, [search, stateFilter, paymentFilter, dateFrom, dateTo, companyFilter]);
 
   async function loadLines(id: number) {
     if (lines[id]) return;
@@ -189,16 +199,19 @@ export function InvoiceListView({
             tableName="invoices"
             dateColumn="date"
             columns={EXPORT_COLUMNS}
-            filters={Array.isArray(moveType) ? {} : { move_type: moveType }}
+            applyFilters={(q) => buildFilters(applyType(q))}
             fileName={exportFileName}
           />
         </div>
-        <FilterPills
-          label="Payment"
-          options={PAYMENT_FILTERS}
-          active={paymentFilter}
-          onChange={setPaymentFilter}
-        />
+        <div className="flex gap-2.5 flex-wrap items-center">
+          <FilterPills
+            label="Payment"
+            options={PAYMENT_FILTERS}
+            active={paymentFilter}
+            onChange={setPaymentFilter}
+          />
+          <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
+        </div>
       </div>
 
       {/* Odoo-style list table */}
@@ -317,6 +330,43 @@ export function InvoiceListView({
         onClose={() => setAnnotationTarget(null)}
       />
     </>
+  );
+}
+
+function DateRange({
+  from,
+  to,
+  onFrom,
+  onTo,
+}: {
+  from: string;
+  to: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+}) {
+  const inputCls =
+    "h-8 px-2 text-xs border border-gray-300 rounded-md text-gray-600 focus:border-[#1a1a2e] focus:outline-none";
+  return (
+    <div className="flex gap-1.5 items-center ml-auto">
+      <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+        Date
+      </span>
+      <input type="date" value={from} onChange={(e) => onFrom(e.target.value)} className={inputCls} title="From date" />
+      <span className="text-gray-400 text-xs">→</span>
+      <input type="date" value={to} onChange={(e) => onTo(e.target.value)} className={inputCls} title="To date" />
+      {(from || to) && (
+        <button
+          onClick={() => {
+            onFrom("");
+            onTo("");
+          }}
+          className="text-xs text-gray-400 hover:text-gray-600 px-1"
+          title="Clear dates"
+        >
+          ✕
+        </button>
+      )}
+    </div>
   );
 }
 

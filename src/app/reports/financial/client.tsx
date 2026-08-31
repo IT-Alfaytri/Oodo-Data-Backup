@@ -12,6 +12,8 @@ import {
   Download,
   CheckCircle2,
   AlertTriangle,
+  CalendarRange,
+  X,
 } from "lucide-react";
 
 interface Summary {
@@ -21,6 +23,7 @@ interface Summary {
   assets: number;
   liabilities: number;
   equity: number;
+  bs_result?: number;
   bs_check: number;
 }
 
@@ -75,6 +78,8 @@ export function FinancialReportsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bucket, setBucket] = useState<(typeof BUCKETS)[number]>("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const { companyFilter } = useCompany();
 
   useEffect(() => {
@@ -85,6 +90,8 @@ export function FinancialReportsClient() {
       try {
         const { data, error } = await supabase.rpc("get_financial_reports", {
           p_company: companyFilter,
+          p_date_from: dateFrom || null,
+          p_date_to: dateTo || null,
         });
         if (error) setError(error.message);
         else setData(data as Reports);
@@ -94,7 +101,9 @@ export function FinancialReportsClient() {
         setLoading(false);
       }
     })();
-  }, [companyFilter]);
+  }, [companyFilter, dateFrom, dateTo]);
+
+  const periodActive = Boolean(dateFrom || dateTo);
 
   const rows = useMemo(() => {
     const tb = data?.trial_balance ?? [];
@@ -129,37 +138,70 @@ export function FinancialReportsClient() {
     downloadCSV(csv, `trial_balance_${bucket.toLowerCase()}.csv`);
   }
 
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="h-40 rounded-xl bg-gray-100 animate-pulse" />
-          <div className="h-40 rounded-xl bg-gray-100 animate-pulse" />
-        </div>
-        <div className="mt-4 h-64 rounded-xl bg-gray-100 animate-pulse" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
-          Could not load reports: {error}
-        </div>
-      </div>
-    );
-  }
-
   const s = data?.summary;
   const balanced = s ? Math.abs(s.bs_check) < 1 : false;
+  const bsResult = s?.bs_result ?? s?.net ?? 0;
+  const plCaption = periodActive
+    ? `${dateFrom || "start"} → ${dateTo || "latest"}`
+    : "all time";
+  const bsCaption = `as of ${dateTo || "latest"}`;
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
-      <p className="text-xs text-gray-400">
-        Computed from posted journal entries (the general ledger). Amounts in QAR.
-      </p>
+      {/* Period controls — kept visible even while refetching */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 text-gray-500">
+          <CalendarRange className="h-4 w-4" />
+          <span className="text-xs font-medium">Period</span>
+        </div>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          className="h-8 px-2 text-xs border border-gray-200 rounded-md text-gray-600 focus:border-[#1a1a2e] focus:outline-none"
+          title="From date — applies to Profit & Loss and Trial Balance"
+        />
+        <span className="text-gray-400 text-xs">to</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          className="h-8 px-2 text-xs border border-gray-200 rounded-md text-gray-600 focus:border-[#1a1a2e] focus:outline-none"
+          title="To / as-of date — the Balance Sheet is a snapshot as of this date"
+        />
+        {periodActive && (
+          <button
+            onClick={() => {
+              setDateFrom("");
+              setDateTo("");
+            }}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 px-1"
+            title="Clear period"
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear
+          </button>
+        )}
+        <p className="text-[11px] text-gray-400 sm:ml-auto">
+          P&amp;L &amp; Trial Balance cover the period; the Balance Sheet is a
+          snapshot as of the &ldquo;to&rdquo; date. Amounts in QAR.
+        </p>
+      </div>
 
+      {loading ? (
+        <div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="h-40 rounded-xl bg-gray-100 animate-pulse" />
+            <div className="h-40 rounded-xl bg-gray-100 animate-pulse" />
+          </div>
+          <div className="mt-4 h-64 rounded-xl bg-gray-100 animate-pulse" />
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+          Could not load reports: {error}
+        </div>
+      ) : (
+        <>
       {/* Summary: P&L + Balance Sheet */}
       <div className="grid gap-4 md:grid-cols-2">
         {/* Profit & Loss */}
@@ -169,6 +211,9 @@ export function FinancialReportsClient() {
             <h2 className="text-sm font-semibold text-[#1a1a2e]">
               Profit &amp; Loss
             </h2>
+            <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
+              {plCaption}
+            </span>
           </div>
           <dl className="space-y-2.5">
             <Row
@@ -204,12 +249,15 @@ export function FinancialReportsClient() {
             <h2 className="text-sm font-semibold text-[#1a1a2e]">
               Balance Sheet
             </h2>
+            <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
+              {bsCaption}
+            </span>
           </div>
           <dl className="space-y-2.5">
             <Row label="Assets" value={s?.assets ?? 0} />
             <Row label="Liabilities" value={s?.liabilities ?? 0} />
             <Row label="Equity" value={s?.equity ?? 0} />
-            <Row label="Current-year result" value={s?.net ?? 0} />
+            <Row label="Result (cumulative)" value={bsResult} />
             <div className="my-2 border-t border-gray-100" />
             <div className="flex items-center justify-between">
               <dt className="text-xs text-gray-500 flex items-center gap-1.5">
@@ -333,6 +381,8 @@ export function FinancialReportsClient() {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

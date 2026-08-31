@@ -65,6 +65,8 @@ export function OrderListView(props: Props) {
   const [filteredCount, setFilteredCount] = useState(0);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [lines, setLines] = useState<Record<number, Row[]>>({});
   const [annotationTarget, setAnnotationTarget] = useState<number | null>(null);
@@ -81,20 +83,29 @@ export function OrderListView(props: Props) {
     }
   }, [supabase, table, companyFilter]);
 
+  const buildFilters = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (q: any) => {
+      if (companyFilter) q = q.eq("company_id", companyFilter);
+      if (search) q = q.or(`name.ilike.%${search}%,partner_id.ilike.%${search}%`);
+      if (stateFilter) q = q.eq("state", stateFilter);
+      if (dateFrom) q = q.gte(dateColumn, dateFrom);
+      if (dateTo) q = q.lte(dateColumn, dateTo);
+      return q;
+    },
+    [companyFilter, search, stateFilter, dateFrom, dateTo, dateColumn]
+  );
+
   const fetchRows = useCallback(async () => {
-    let q = supabase
-      .from(table)
-      .select("*", { count: "exact" })
-      .order(dateColumn, { ascending: false });
-    if (companyFilter) q = q.eq("company_id", companyFilter);
-    if (search) q = q.or(`name.ilike.%${search}%,partner_id.ilike.%${search}%`);
-    if (stateFilter) q = q.eq("state", stateFilter);
+    let q = buildFilters(
+      supabase.from(table).select("*", { count: "exact" })
+    ).order(dateColumn, { ascending: false });
     const from = (page - 1) * PAGE_SIZE;
     q = q.range(from, from + PAGE_SIZE - 1);
     const { data, count } = await q;
     setRows((data as Row[]) ?? []);
     setFilteredCount(count ?? 0);
-  }, [supabase, table, dateColumn, page, search, stateFilter, companyFilter]);
+  }, [supabase, table, dateColumn, page, buildFilters]);
 
   useEffect(() => {
     fetchStats();
@@ -104,7 +115,7 @@ export function OrderListView(props: Props) {
   }, [fetchRows]);
   useEffect(() => {
     setPage(1);
-  }, [search, stateFilter, companyFilter]);
+  }, [search, stateFilter, dateFrom, dateTo, companyFilter]);
 
   async function loadLines(id: number) {
     if (lines[id]) return;
@@ -158,10 +169,41 @@ export function OrderListView(props: Props) {
             {f.label}
           </button>
         ))}
+        <div className="flex gap-1.5 items-center ml-auto">
+          <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Date</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-8 px-2 text-xs border border-gray-300 rounded-md text-gray-600 focus:border-[#1a1a2e] focus:outline-none"
+            title="From date"
+          />
+          <span className="text-gray-400 text-xs">→</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-8 px-2 text-xs border border-gray-300 rounded-md text-gray-600 focus:border-[#1a1a2e] focus:outline-none"
+            title="To date"
+          />
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="text-xs text-gray-400 hover:text-gray-600 px-1"
+              title="Clear dates"
+            >
+              ✕
+            </button>
+          )}
+        </div>
         <ExportDialog
           tableName={table}
           dateColumn={dateColumn}
           columns={exportColumns}
+          applyFilters={buildFilters}
           fileName={exportFileName}
         />
       </div>
