@@ -72,7 +72,7 @@ export function DataTable<T extends { id: number }>({
                     handleSort(col.key);
                   }
                 }}
-                className={`bg-gray-100 px-3.5 py-2.5 text-left text-[11px] text-gray-500 uppercase tracking-wide font-semibold cursor-pointer hover:bg-gray-200 whitespace-nowrap sticky top-[52px] z-10 ${
+                className={`bg-gray-100 px-3.5 py-2.5 text-left text-[11px] text-gray-500 uppercase tracking-wide font-semibold cursor-pointer hover:bg-gray-200 whitespace-nowrap ${
                   col.className ?? ""
                 }`}
               >

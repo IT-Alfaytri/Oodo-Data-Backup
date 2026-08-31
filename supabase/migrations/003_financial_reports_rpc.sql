@@ -4,12 +4,20 @@
 -- chart of accounts, server-side (REST aggregates are disabled on this project
 -- and the ledger is ~370k rows). Posted entries only.
 --
+-- p_company: NULL = all companies; otherwise filter invoice_lines.company_id
+--            (the company NAME, e.g. 'Al-Faytri Maintenance') to match the
+--            app's company switcher.
+--
 -- Join: invoice_lines.account_id is TEXT "<code> <name>"; the code is the first
 -- token. chart_of_accounts has duplicate codes (multi-company), so it's
 -- de-duplicated to (code, account_type) before the join to avoid double-counting.
 -- ============================================================
 
-CREATE OR REPLACE FUNCTION get_financial_reports()
+-- Old no-arg version would become an ambiguous overload once a defaulted arg is
+-- added, so drop it first.
+DROP FUNCTION IF EXISTS get_financial_reports();
+
+CREATE OR REPLACE FUNCTION get_financial_reports(p_company text DEFAULT NULL)
 RETURNS json
 LANGUAGE sql
 STABLE
@@ -22,7 +30,6 @@ WITH coa AS (
   WHERE code IS NOT NULL AND account_type IS NOT NULL
 ),
 coa_named AS (
-  -- one display name per code (any is fine — dupes share code/type)
   SELECT code, min(name) AS name FROM chart_of_accounts WHERE code IS NOT NULL GROUP BY code
 ),
 posted AS (
@@ -31,7 +38,9 @@ posted AS (
          COALESCE(il.credit, 0) AS credit,
          COALESCE(il.balance, COALESCE(il.debit,0) - COALESCE(il.credit,0)) AS balance
   FROM invoice_lines il
-  WHERE il.parent_state = 'posted' AND il.account_id IS NOT NULL
+  WHERE il.parent_state = 'posted'
+    AND il.account_id IS NOT NULL
+    AND (p_company IS NULL OR il.company_id = p_company)
 ),
 joined AS (
   SELECT p.code, coa.account_type,
@@ -86,7 +95,7 @@ SELECT json_build_object(
 );
 $$;
 
-REVOKE ALL ON FUNCTION get_financial_reports() FROM public, anon;
-GRANT EXECUTE ON FUNCTION get_financial_reports() TO authenticated, service_role;
+REVOKE ALL ON FUNCTION get_financial_reports(text) FROM public, anon;
+GRANT EXECUTE ON FUNCTION get_financial_reports(text) TO authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';

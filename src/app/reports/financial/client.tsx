@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCompany } from "@/lib/company-context";
 import { generateCSV, downloadCSV } from "@/lib/export";
 import {
   TrendingUp,
@@ -74,12 +75,17 @@ export function FinancialReportsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bucket, setBucket] = useState<(typeof BUCKETS)[number]>("All");
+  const { companyFilter } = useCompany();
 
   useEffect(() => {
     const supabase = createClient();
+    setLoading(true);
+    setError(null);
     (async () => {
       try {
-        const { data, error } = await supabase.rpc("get_financial_reports");
+        const { data, error } = await supabase.rpc("get_financial_reports", {
+          p_company: companyFilter,
+        });
         if (error) setError(error.message);
         else setData(data as Reports);
       } catch (e) {
@@ -88,7 +94,7 @@ export function FinancialReportsClient() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [companyFilter]);
 
   const rows = useMemo(() => {
     const tb = data?.trial_balance ?? [];
