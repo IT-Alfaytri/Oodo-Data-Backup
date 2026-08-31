@@ -13,6 +13,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { formatAmount, formatDate, PAGE_SIZE } from "@/lib/constants";
 import type { Invoice, InvoiceLine } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
+import { ChatterPanel } from "@/components/shared/chatter-panel";
 
 const FILTERS = [
   { label: "Posted", value: "posted" },
@@ -316,6 +317,7 @@ export function CustomerInvoicesClient() {
                   Loading lines...
                 </div>
               )}
+              <ChatterPanel model="account.move" resId={invoice.id} />
             </AccordionCard>
           ))
         )}

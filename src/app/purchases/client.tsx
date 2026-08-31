@@ -13,6 +13,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { formatAmount, formatDate, PAGE_SIZE } from "@/lib/constants";
 import type { PurchaseOrder, PurchaseOrderLine } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
+import { ChatterPanel } from "@/components/shared/chatter-panel";
 
 const FILTERS = [
   { label: "Draft", value: "draft" },
@@ -279,6 +280,7 @@ export function PurchasesClient() {
                   Loading lines...
                 </div>
               )}
+              <ChatterPanel model="purchase.order" resId={order.id} />
             </AccordionCard>
           ))
         )}

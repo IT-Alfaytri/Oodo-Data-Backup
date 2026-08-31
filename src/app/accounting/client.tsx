@@ -13,6 +13,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { formatAmount, formatDate, PAGE_SIZE } from "@/lib/constants";
 import type { Payment } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
+import { ChatterPanel } from "@/components/shared/chatter-panel";
 
 const FILTERS = [
   { label: "Posted", value: "posted" },
@@ -182,6 +183,7 @@ export function AccountingClient() {
                   <MessageSquare className="h-4 w-4" />
                 </button>
               </div>
+              <ChatterPanel model="account.payment" resId={payment.id} />
             </div>
           )}
         />

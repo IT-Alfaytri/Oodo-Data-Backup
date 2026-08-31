@@ -12,6 +12,7 @@ import { ExportDialog } from "@/components/shared/export-dialog";
 import { PAGE_SIZE } from "@/lib/constants";
 import type { Employee } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
+import { ChatterPanel } from "@/components/shared/chatter-panel";
 
 const COLUMNS: Column<Employee>[] = [
   { key: "name", label: "Name" },
@@ -116,6 +117,7 @@ export function EmployeesClient() {
                   <MessageSquare className="h-4 w-4" />
                 </button>
               </div>
+              <ChatterPanel model="hr.employee" resId={employee.id} />
             </div>
           )}
         />

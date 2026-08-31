@@ -31,6 +31,7 @@ export const NAV_ITEMS = [
   { label: "Costing", href: "/costing", icon: "DollarSign" },
   { label: "Employees", href: "/employees", icon: "Briefcase" },
   { label: "Reports", href: "/reports", icon: "BarChart3" },
+  { label: "Financial Reports", href: "/reports/financial", icon: "Landmark" },
 ] as const;
 
 export function formatAmount(amount: number | null | undefined): string {

@@ -12,6 +12,7 @@ import { ExportDialog } from "@/components/shared/export-dialog";
 import { formatAmount, PAGE_SIZE } from "@/lib/constants";
 import type { Contact } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
+import { ChatterPanel } from "@/components/shared/chatter-panel";
 
 const FILTERS = [
   { label: "Company", value: "company" },
@@ -174,6 +175,7 @@ export function CustomersClient() {
                   <MessageSquare className="h-4 w-4" />
                 </button>
               </div>
+              <ChatterPanel model="res.partner" resId={customer.id} />
             </div>
           )}
         />

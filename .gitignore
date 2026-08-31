@@ -29,6 +29,7 @@ docs/superpowers/
 *.pem
 /scripts
 oodo.py
+/Data
 
 # debug
 npm-debug.log*

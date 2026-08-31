@@ -11,6 +11,7 @@ import { ExportDialog } from "@/components/shared/export-dialog";
 import { formatAmount, PAGE_SIZE } from "@/lib/constants";
 import type { LandedCost, LandedCostLine } from "@/lib/types";
 import { MessageSquare } from "lucide-react";
+import { ChatterPanel } from "@/components/shared/chatter-panel";
 
 const FILTERS = [
   { label: "Done", value: "done" },
@@ -236,6 +237,7 @@ export function CostingClient() {
                   Loading lines...
                 </div>
               )}
+              <ChatterPanel model="stock.landed.cost" resId={cost.id} />
             </AccordionCard>
           ))
         )}
