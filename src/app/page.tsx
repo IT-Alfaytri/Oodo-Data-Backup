@@ -21,7 +21,13 @@ import {
   DollarSign,
   Briefcase,
   Loader2,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  Landmark,
 } from "lucide-react";
+
+const TODAY = new Date().toISOString().slice(0, 10);
 
 const SECTIONS = [
   {
@@ -134,6 +140,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [totalSales, setTotalSales] = useState(0);
+  const [kpis, setKpis] = useState({ ar: 0, ap: 0, overdue: 0, net: 0 });
   const [userEmail, setUserEmail] = useState<string | undefined>();
 
   // Fetch user email on mount
@@ -206,6 +213,42 @@ export default function DashboardPage() {
       ) ?? 0;
     setTotalSales(total);
 
+    // Financial KPIs (company-aware). Aggregates are enabled on this project.
+    const arApBase = (mt: string) => {
+      let q = supabase
+        .from("invoices")
+        .select("amount_residual.sum()")
+        .eq("move_type", mt)
+        .eq("state", "posted");
+      if (companyFilter !== null) q = q.eq("company_id", companyFilter);
+      return q;
+    };
+    let overdueQ = supabase
+      .from("invoices")
+      .select("amount_residual.sum()")
+      .eq("move_type", "out_invoice")
+      .eq("state", "posted")
+      .neq("payment_state", "paid")
+      .not("invoice_date_due", "is", null)
+      .lt("invoice_date_due", TODAY);
+    if (companyFilter !== null) overdueQ = overdueQ.eq("company_id", companyFilter);
+
+    const [arRes, apRes, ovRes, finRes] = await Promise.all([
+      arApBase("out_invoice").single(),
+      arApBase("in_invoice").single(),
+      overdueQ.single(),
+      supabase.rpc("get_financial_reports", { p_company: companyFilter }),
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sum = (r: any) => (r?.data?.sum ?? 0) as number;
+    setKpis({
+      ar: sum(arRes),
+      ap: sum(apRes),
+      overdue: sum(ovRes),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      net: (finRes.data as any)?.summary?.net ?? 0,
+    });
+
     setLoading(false);
   }, [supabase, companyFilter]);
 
@@ -244,6 +287,13 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+              <KpiCard tone="emerald" icon={<TrendingUp className="h-5 w-5" />} label="Receivable (unpaid)" value={formatAmount(kpis.ar)} />
+              <KpiCard tone="orange" icon={<TrendingDown className="h-5 w-5" />} label="Payable (unpaid)" value={formatAmount(kpis.ap)} />
+              <KpiCard tone="red" icon={<AlertTriangle className="h-5 w-5" />} label="Overdue Receivable" value={formatAmount(kpis.overdue)} />
+              <KpiCard tone="indigo" icon={<Landmark className="h-5 w-5" />} label="Net Profit (posted)" value={formatAmount(kpis.net)} />
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {SECTIONS.map((section) => {
                 const Icon = section.icon;
@@ -274,5 +324,44 @@ export default function DashboardPage() {
         )}
       </div>
     </>
+  );
+}
+
+const TONES: Record<string, string> = {
+  emerald: "bg-emerald-50 text-emerald-600",
+  orange: "bg-orange-50 text-orange-600",
+  red: "bg-red-50 text-red-600",
+  indigo: "bg-indigo-50 text-indigo-600",
+};
+
+function KpiCard({
+  tone,
+  icon,
+  label,
+  value,
+}: {
+  tone: string;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 px-5 py-4 flex items-center gap-4 shadow-sm">
+      <div
+        className={`h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          TONES[tone] ?? TONES.indigo
+        }`}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className="text-lg font-bold text-[#1a1a2e] tabular-nums truncate">
+          {value}
+        </div>
+        <div className="text-[11px] text-gray-500 uppercase tracking-wide">
+          {label}
+        </div>
+      </div>
+    </div>
   );
 }

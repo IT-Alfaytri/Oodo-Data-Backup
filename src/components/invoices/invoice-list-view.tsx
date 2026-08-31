@@ -26,7 +26,18 @@ const PAYMENT_FILTERS = [
   { label: "Partial", value: "partial" },
   { label: "In Payment", value: "in_payment" },
   { label: "Reversed", value: "reversed" },
+  { label: "Overdue", value: "overdue" },
 ];
+
+const TODAY = new Date().toISOString().slice(0, 10);
+
+function isOverdue(inv: Invoice): boolean {
+  if (inv.state !== "posted") return false;
+  if (inv.payment_state === "paid" || inv.payment_state === "reversed") return false;
+  if (!inv.invoice_date_due) return false;
+  if ((inv.amount_residual ?? 0) <= 0) return false;
+  return String(inv.invoice_date_due).slice(0, 10) < TODAY;
+}
 
 const EXPORT_COLUMNS = [
   "id", "name", "state", "partner_id", "invoice_date", "invoice_date_due",
@@ -92,7 +103,15 @@ export function InvoiceListView({
     if (companyFilter) query = query.eq("company_id", companyFilter);
     if (search) query = query.or(`name.ilike.%${search}%,partner_id.ilike.%${search}%`);
     if (stateFilter) query = query.eq("state", stateFilter);
-    if (paymentFilter) query = query.eq("payment_state", paymentFilter);
+    if (paymentFilter === "overdue") {
+      query = query
+        .eq("state", "posted")
+        .neq("payment_state", "paid")
+        .not("invoice_date_due", "is", null)
+        .lt("invoice_date_due", TODAY);
+    } else if (paymentFilter) {
+      query = query.eq("payment_state", paymentFilter);
+    }
 
     const from = (page - 1) * PAGE_SIZE;
     query = query.range(from, from + PAGE_SIZE - 1);
@@ -249,8 +268,13 @@ export function InvoiceListView({
                           >
                             {formatAmount(inv.amount_residual)}
                           </td>
-                          <td className="px-3 py-2.5 text-center">
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
                             <StatusBadge status={inv.payment_state} />
+                            {isOverdue(inv) && (
+                              <span className="ml-1 inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-red-100 text-red-700">
+                                Overdue
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <StatusBadge status={inv.state} />
