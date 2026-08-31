@@ -3,17 +3,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useCompany } from "@/lib/company-context";
-import { generateCSV, downloadCSV } from "@/lib/export";
+import { downloadCSV } from "@/lib/export";
+import { downloadXlsx } from "@/lib/xlsx";
+import { printHtml, buildReportHtml, type PrintTable } from "@/lib/print";
 import {
-  TrendingUp,
-  TrendingDown,
-  Scale,
-  Landmark,
+  Statement,
+  buildProfitAndLoss,
+  buildBalanceSheet,
+  type AccountLine,
+  type EquityInfo,
+  type LedgerData,
+  type StmtRow,
+} from "./statement";
+import {
+  CalendarRange,
+  X,
+  Printer,
+  FileSpreadsheet,
   Download,
   CheckCircle2,
   AlertTriangle,
-  CalendarRange,
-  X,
 } from "lucide-react";
 
 interface Summary {
@@ -26,7 +35,6 @@ interface Summary {
   bs_result?: number;
   bs_check: number;
 }
-
 interface TBRow {
   code: string;
   name: string;
@@ -36,14 +44,23 @@ interface TBRow {
   credit: number;
   balance: number;
 }
-
 interface Reports {
   summary: Summary;
   trial_balance: TBRow[];
+  pl_accounts: AccountLine[];
+  bs_accounts: AccountLine[];
+  equity: EquityInfo;
+  ref_date: string | null;
 }
 
-const BUCKETS = ["All", "Asset", "Liability", "Equity", "Income", "Expense"] as const;
+type Tab = "pl" | "bs" | "tb";
+const TABS: { key: Tab; label: string }[] = [
+  { key: "pl", label: "Profit & Loss" },
+  { key: "bs", label: "Balance Sheet" },
+  { key: "tb", label: "Trial Balance" },
+];
 
+const BUCKETS = ["All", "Asset", "Liability", "Equity", "Income", "Expense"] as const;
 const BUCKET_COLOR: Record<string, string> = {
   Asset: "text-blue-600 bg-blue-50",
   Liability: "text-amber-600 bg-amber-50",
@@ -61,29 +78,54 @@ function fmt(n: number | null | undefined): string {
   }).format(v);
 }
 
-/** Signed amount, red when negative, muted zero. */
-function Amount({ value, bold }: { value: number; bold?: boolean }) {
-  const v = Number(value) || 0;
-  const cls =
-    v < 0 ? "text-red-600" : v > 0 ? "text-gray-800" : "text-gray-400";
-  return (
-    <span className={`tabular-nums ${bold ? "font-semibold" : ""} ${cls}`}>
-      {fmt(v)}
-    </span>
-  );
+function matrixCsv(columns: string[], rows: (string | number | null)[][]): string {
+  const esc = (v: string | number | null) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [columns.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))].join("\n");
+}
+
+// ---- statement (P&L / BS) → export shapes ----
+function statementMatrix(rows: StmtRow[]): { columns: string[]; rows: (string | number | null)[][] } {
+  return {
+    columns: ["Account", "Amount"],
+    rows: rows.map((r) => ["  ".repeat(r.level) + r.label, r.value]),
+  };
+}
+function statementPrint(rows: StmtRow[]): PrintTable {
+  return {
+    columns: [
+      { label: "Account", align: "left" },
+      { label: "Amount", align: "right" },
+    ],
+    rows: rows.map((r) => ({
+      cells: [r.label, r.value],
+      indent: r.level,
+      bold:
+        r.variant === "section" ||
+        r.variant === "subtotal" ||
+        r.variant === "total" ||
+        r.variant === "grandtotal",
+      topBorder: r.variant === "subtotal" || r.variant === "total" || r.variant === "grandtotal",
+      muted: r.variant === "subheader",
+    })),
+  };
 }
 
 export function FinancialReportsClient() {
+  const supabase = createClient();
+  const { companyFilter } = useCompany();
   const [data, setData] = useState<Reports | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [bucket, setBucket] = useState<(typeof BUCKETS)[number]>("All");
+  const [tab, setTab] = useState<Tab>("pl");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const { companyFilter } = useCompany();
+  const [bucket, setBucket] = useState<(typeof BUCKETS)[number]>("All");
 
   useEffect(() => {
-    const supabase = createClient();
     setLoading(true);
     setError(null);
     (async () => {
@@ -101,54 +143,127 @@ export function FinancialReportsClient() {
         setLoading(false);
       }
     })();
-  }, [companyFilter, dateFrom, dateTo]);
+  }, [supabase, companyFilter, dateFrom, dateTo]);
 
   const periodActive = Boolean(dateFrom || dateTo);
+  const asOf = dateTo || data?.ref_date || "latest";
+  const companyLabel = companyFilter ?? "All Companies";
 
-  const rows = useMemo(() => {
+  const plRows = useMemo(
+    () => (data ? buildProfitAndLoss(data.pl_accounts) : []),
+    [data]
+  );
+  const bsRows = useMemo(
+    () => (data ? buildBalanceSheet(data.bs_accounts, data.equity) : []),
+    [data]
+  );
+
+  const tbRows = useMemo(() => {
     const tb = data?.trial_balance ?? [];
     return bucket === "All" ? tb : tb.filter((r) => r.bucket === bucket);
   }, [data, bucket]);
+  const tbTotals = useMemo(
+    () =>
+      tbRows.reduce(
+        (a, r) => ({
+          debit: a.debit + (r.debit || 0),
+          credit: a.credit + (r.credit || 0),
+          balance: a.balance + (r.balance || 0),
+        }),
+        { debit: 0, credit: 0, balance: 0 }
+      ),
+    [tbRows]
+  );
 
-  const totals = useMemo(() => {
-    return rows.reduce(
-      (a, r) => ({
-        debit: a.debit + (r.debit || 0),
-        credit: a.credit + (r.credit || 0),
-        balance: a.balance + (r.balance || 0),
-      }),
-      { debit: 0, credit: 0, balance: 0 }
-    );
-  }, [rows]);
-
-  function exportTB() {
-    const cols = ["code", "account", "type", "bucket", "debit", "credit", "balance"];
-    const csv = generateCSV(
-      rows.map((r) => ({
-        code: r.code,
-        account: r.name,
-        type: r.account_type,
-        bucket: r.bucket,
-        debit: r.debit,
-        credit: r.credit,
-        balance: r.balance,
-      })),
-      cols
-    );
-    downloadCSV(csv, `trial_balance_${bucket.toLowerCase()}.csv`);
+  // Drill-down: P&L uses the period; Balance Sheet is cumulative as-of `to`.
+  function makeLedgerFetcher(kind: "pl" | "bs") {
+    return async (code: string): Promise<LedgerData> => {
+      const from = kind === "pl" ? dateFrom || null : null;
+      const { data, error } = await supabase.rpc("get_account_ledger", {
+        p_code: code,
+        p_company: companyFilter,
+        p_date_from: from,
+        p_date_to: dateTo || null,
+      });
+      if (error) throw new Error(error.message);
+      return data as LedgerData;
+    };
   }
 
-  const s = data?.summary;
-  const balanced = s ? Math.abs(s.bs_check) < 1 : false;
-  const bsResult = s?.bs_result ?? s?.net ?? 0;
-  const plCaption = periodActive
-    ? `${dateFrom || "start"} → ${dateTo || "latest"}`
-    : "all time";
-  const bsCaption = `as of ${dateTo || "latest"}`;
+  const periodLabel =
+    tab === "bs"
+      ? `As of ${asOf}`
+      : periodActive
+      ? `${dateFrom || "start"} → ${dateTo || "latest"}`
+      : "All time";
+  const suffix = periodActive ? `_${dateFrom || "start"}_${dateTo || "end"}` : "";
+
+  function activeExport(): {
+    title: string;
+    file: string;
+    matrix: { columns: string[]; rows: (string | number | null)[][] };
+    print: PrintTable;
+  } {
+    if (tab === "pl") {
+      return {
+        title: "Profit and Loss",
+        file: `profit_and_loss${suffix}`,
+        matrix: statementMatrix(plRows),
+        print: statementPrint(plRows),
+      };
+    }
+    if (tab === "bs") {
+      return {
+        title: "Balance Sheet",
+        file: `balance_sheet${suffix}`,
+        matrix: statementMatrix(bsRows),
+        print: statementPrint(bsRows),
+      };
+    }
+    const cols = ["Code", "Account", "Type", "Debit", "Credit", "Balance"];
+    return {
+      title: "Trial Balance",
+      file: `trial_balance_${bucket.toLowerCase()}${suffix}`,
+      matrix: {
+        columns: cols,
+        rows: tbRows.map((r) => [r.code, r.name, r.account_type, r.debit, r.credit, r.balance]),
+      },
+      print: {
+        columns: [
+          { label: "Code", align: "left" },
+          { label: "Account", align: "left" },
+          { label: "Debit", align: "right" },
+          { label: "Credit", align: "right" },
+          { label: "Balance", align: "right" },
+        ],
+        rows: tbRows.map((r) => ({ cells: [r.code, r.name, r.debit, r.credit, r.balance] })),
+      },
+    };
+  }
+
+  function doExport(kind: "pdf" | "xlsx" | "csv") {
+    const exp = activeExport();
+    if (kind === "csv") {
+      downloadCSV(matrixCsv(exp.matrix.columns, exp.matrix.rows), `${exp.file}.csv`);
+    } else if (kind === "xlsx") {
+      downloadXlsx([{ name: exp.title, columns: exp.matrix.columns, rows: exp.matrix.rows }], exp.file);
+    } else {
+      printHtml(
+        buildReportHtml({
+          title: exp.title,
+          company: companyLabel,
+          period: periodLabel,
+          table: exp.print,
+        })
+      );
+    }
+  }
+
+  const balanced = data ? Math.abs(data.summary.bs_check) < 1 : false;
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
-      {/* Period controls — kept visible even while refetching */}
+      {/* Period controls — always visible, even while refetching */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1.5 text-gray-500">
           <CalendarRange className="h-4 w-4" />
@@ -183,228 +298,188 @@ export function FinancialReportsClient() {
           </button>
         )}
         <p className="text-[11px] text-gray-400 sm:ml-auto">
-          P&amp;L &amp; Trial Balance cover the period; the Balance Sheet is a
-          snapshot as of the &ldquo;to&rdquo; date. Amounts in QAR.
+          {companyLabel} &middot; Amounts in QAR
         </p>
       </div>
 
-      {loading ? (
-        <div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="h-40 rounded-xl bg-gray-100 animate-pulse" />
-            <div className="h-40 rounded-xl bg-gray-100 animate-pulse" />
-          </div>
-          <div className="mt-4 h-64 rounded-xl bg-gray-100 animate-pulse" />
+      {/* Tabs + export toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1.5">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                tab === t.key
+                  ? "bg-[#1a1a2e] text-white border-[#1a1a2e]"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
+        <div className="flex gap-1.5">
+          <ExportBtn icon={<Printer className="h-4 w-4" />} label="PDF" onClick={() => doExport("pdf")} disabled={loading} />
+          <ExportBtn icon={<FileSpreadsheet className="h-4 w-4" />} label="XLSX" onClick={() => doExport("xlsx")} disabled={loading} />
+          <ExportBtn icon={<Download className="h-4 w-4" />} label="CSV" onClick={() => doExport("csv")} disabled={loading} />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="h-96 rounded-xl bg-gray-100 animate-pulse" />
       ) : error ? (
         <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
           Could not load reports: {error}
         </div>
       ) : (
-        <>
-      {/* Summary: P&L + Balance Sheet */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Profit & Loss */}
-        <div className="rounded-xl border border-gray-100 bg-white p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Scale className="h-4 w-4 text-[#1a1a2e]" />
-            <h2 className="text-sm font-semibold text-[#1a1a2e]">
-              Profit &amp; Loss
-            </h2>
-            <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
-              {plCaption}
-            </span>
-          </div>
-          <dl className="space-y-2.5">
-            <Row
-              icon={<TrendingUp className="h-3.5 w-3.5 text-green-500" />}
-              label="Income (revenue)"
-              value={s?.income ?? 0}
-            />
-            <Row
-              icon={<TrendingDown className="h-3.5 w-3.5 text-red-500" />}
-              label="Expenses"
-              value={s?.expense ?? 0}
-            />
-            <div className="my-2 border-t border-gray-100" />
-            <div className="flex items-center justify-between">
-              <dt className="text-sm font-semibold text-[#1a1a2e]">
-                Net {s && s.net < 0 ? "Loss" : "Profit"}
-              </dt>
-              <dd
-                className={`text-lg font-bold tabular-nums ${
-                  s && s.net < 0 ? "text-red-600" : "text-green-600"
+        <div className="rounded-xl border border-gray-100 bg-white p-4 sm:p-6">
+          {/* Report header */}
+          <div className="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-gray-100">
+            <div>
+              <h2 className="text-base font-semibold text-[#1a1a2e]">
+                {tab === "pl" ? "Profit & Loss" : tab === "bs" ? "Balance Sheet" : "Trial Balance"}
+              </h2>
+              <p className="text-xs text-gray-400 tabular-nums">{periodLabel}</p>
+            </div>
+            {tab === "bs" && (
+              <span
+                className={`flex items-center gap-1.5 text-xs ${
+                  balanced ? "text-green-600" : "text-amber-600 font-medium"
                 }`}
               >
-                {fmt(s?.net ?? 0)}
-              </dd>
-            </div>
-          </dl>
-        </div>
-
-        {/* Balance Sheet */}
-        <div className="rounded-xl border border-gray-100 bg-white p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Landmark className="h-4 w-4 text-[#1a1a2e]" />
-            <h2 className="text-sm font-semibold text-[#1a1a2e]">
-              Balance Sheet
-            </h2>
-            <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
-              {bsCaption}
-            </span>
-          </div>
-          <dl className="space-y-2.5">
-            <Row label="Assets" value={s?.assets ?? 0} />
-            <Row label="Liabilities" value={s?.liabilities ?? 0} />
-            <Row label="Equity" value={s?.equity ?? 0} />
-            <Row label="Result (cumulative)" value={bsResult} />
-            <div className="my-2 border-t border-gray-100" />
-            <div className="flex items-center justify-between">
-              <dt className="text-xs text-gray-500 flex items-center gap-1.5">
                 {balanced ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                  <CheckCircle2 className="h-4 w-4" />
                 ) : (
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                  <AlertTriangle className="h-4 w-4" />
                 )}
-                {balanced ? "Balances" : "Out of balance by"}
-              </dt>
-              <dd
-                className={`text-xs tabular-nums ${
-                  balanced ? "text-gray-400" : "text-amber-600 font-medium"
-                }`}
-              >
-                {balanced ? "Assets = Liab + Equity + Result" : fmt(s?.bs_check ?? 0)}
-              </dd>
-            </div>
-          </dl>
-        </div>
-      </div>
-
-      {/* Trial Balance */}
-      <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2 p-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-[#1a1a2e] mr-2">
-            Trial Balance
-          </h2>
-          <div className="flex flex-wrap gap-1.5">
-            {BUCKETS.map((b) => (
-              <button
-                key={b}
-                onClick={() => setBucket(b)}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                  bucket === b
-                    ? "bg-[#1a1a2e] text-white border-[#1a1a2e]"
-                    : "border-gray-200 text-gray-500 hover:border-gray-300"
-                }`}
-              >
-                {b}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={exportTB}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            CSV
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-gray-400 bg-gray-50/60">
-                <th className="text-left font-medium px-4 py-2.5">Code</th>
-                <th className="text-left font-medium px-4 py-2.5">Account</th>
-                <th className="text-left font-medium px-4 py-2.5 hidden sm:table-cell">
-                  Type
-                </th>
-                <th className="text-right font-medium px-4 py-2.5">Debit</th>
-                <th className="text-right font-medium px-4 py-2.5">Credit</th>
-                <th className="text-right font-medium px-4 py-2.5">Balance</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
-                    No accounts
-                  </td>
-                </tr>
-              ) : (
-                rows.map((r) => (
-                  <tr key={r.code + r.account_type} className="hover:bg-gray-50/60">
-                    <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
-                      {r.code}
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-700">{r.name}</td>
-                    <td className="px-4 py-2.5 hidden sm:table-cell">
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full ${
-                          BUCKET_COLOR[r.bucket] ?? BUCKET_COLOR.Other
-                        }`}
-                      >
-                        {r.bucket}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Amount value={r.debit} />
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Amount value={r.credit} />
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Amount value={r.balance} bold />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-            {rows.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-gray-100 bg-gray-50/60 font-semibold">
-                  <td className="px-4 py-2.5 text-[#1a1a2e]" colSpan={3}>
-                    Total ({rows.length} accounts)
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Amount value={totals.debit} bold />
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Amount value={totals.credit} bold />
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Amount value={totals.balance} bold />
-                  </td>
-                </tr>
-              </tfoot>
+                {balanced ? "Balanced" : `Out by ${fmt(data?.summary.bs_check)}`}
+              </span>
             )}
-          </table>
+          </div>
+
+          {tab === "pl" && (
+            <Statement
+              key={`pl-${companyFilter}-${dateFrom}-${dateTo}`}
+              rows={plRows}
+              fetchLedger={makeLedgerFetcher("pl")}
+            />
+          )}
+          {tab === "bs" && (
+            <Statement
+              key={`bs-${companyFilter}-${dateFrom}-${dateTo}`}
+              rows={bsRows}
+              fetchLedger={makeLedgerFetcher("bs")}
+            />
+          )}
+          {tab === "tb" && (
+            <div>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {BUCKETS.map((b) => (
+                  <button
+                    key={b}
+                    onClick={() => setBucket(b)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                      bucket === b
+                        ? "bg-[#1a1a2e] text-white border-[#1a1a2e]"
+                        : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[11px] uppercase tracking-wide text-gray-400 bg-gray-50/60">
+                      <th className="text-left font-medium px-4 py-2.5">Code</th>
+                      <th className="text-left font-medium px-4 py-2.5">Account</th>
+                      <th className="text-left font-medium px-4 py-2.5 hidden sm:table-cell">Type</th>
+                      <th className="text-right font-medium px-4 py-2.5">Debit</th>
+                      <th className="text-right font-medium px-4 py-2.5">Credit</th>
+                      <th className="text-right font-medium px-4 py-2.5">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {tbRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
+                          No accounts
+                        </td>
+                      </tr>
+                    ) : (
+                      tbRows.map((r) => (
+                        <tr key={r.code + r.account_type} className="hover:bg-gray-50/60">
+                          <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{r.code}</td>
+                          <td className="px-4 py-2.5 text-gray-700">{r.name}</td>
+                          <td className="px-4 py-2.5 hidden sm:table-cell">
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full ${
+                                BUCKET_COLOR[r.bucket] ?? BUCKET_COLOR.Other
+                              }`}
+                            >
+                              {r.bucket}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">
+                            {r.debit ? fmt(r.debit) : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">
+                            {r.credit ? fmt(r.credit) : "—"}
+                          </td>
+                          <td
+                            className={`px-4 py-2.5 text-right tabular-nums font-medium ${
+                              r.balance < 0 ? "text-red-600" : "text-gray-800"
+                            }`}
+                          >
+                            {fmt(r.balance)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  {tbRows.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-100 bg-gray-50/60 font-semibold">
+                        <td className="px-4 py-2.5 text-[#1a1a2e]" colSpan={3}>
+                          Total ({tbRows.length} accounts)
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmt(tbTotals.debit)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmt(tbTotals.credit)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmt(tbTotals.balance)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-        </>
       )}
     </div>
   );
 }
 
-function Row({
-  label,
-  value,
+function ExportBtn({
   icon,
+  label,
+  onClick,
+  disabled,
 }: {
+  icon: React.ReactNode;
   label: string;
-  value: number;
-  icon?: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <dt className="text-sm text-gray-500 flex items-center gap-1.5">
-        {icon}
-        {label}
-      </dt>
-      <dd className="text-sm">
-        <Amount value={value} />
-      </dd>
-    </div>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
